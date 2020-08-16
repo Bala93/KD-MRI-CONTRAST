@@ -7,28 +7,33 @@ import torch
 from skimage import feature
 import os 
 from utils import npComplexToTorch
+import glob
 
-class SliceData(Dataset):
+class SliceDataMulti(Dataset):
     """
     A PyTorch Dataset that provides access to MR image slices.
     """
 
     #def __init__(self, root, acc_factor,dataset_type,mask_path): # acc_factor can be passed here and saved as self variable
-    def __init__(self, root, acc_factor,dataset_type): # acc_factor can be passed here and saved as self variable
+    def __init__(self, root, acc_factor, mode): # acc_factor can be passed here and saved as self variable
         # List the h5 files in root 
-        files = list(pathlib.Path(root).iterdir())
+
         self.examples = []
         self.acc_factor = acc_factor 
-        self.dataset_type = dataset_type
         self.key_img = 'img_volus_{}'.format(self.acc_factor)
         self.key_kspace = 'kspace_volus_{}'.format(self.acc_factor)
-        #mask_path = os.path.join(mask_path,'mask_{}.npy'.format(acc_factor))
-        #self.mask = np.load(mask_path)
 
-        for fname in sorted(files):
-            with h5py.File(fname,'r') as hf:
+        self.flair_dir = os.path.join(root, 'mrbrain_flair', 'cartesian', mode,'acc_{}'.format(acc_factor))
+        self.t1_dir    = os.path.join(root, 'mrbrain_t1', 'cartesian', mode, 'acc_{}'.format(acc_factor))
+
+        files = glob.glob(os.path.join(self.flair_dir,'*.h5'))
+
+        for file_path in sorted(files):
+            with h5py.File(file_path,'r') as hf:
+                #print (hf.keys())
                 fsvol = hf['volfs']
                 num_slices = fsvol.shape[2]
+                fname = os.path.basename(file_path)
                 self.examples += [(fname, slice) for slice in range(num_slices)]
 
     def __len__(self):
@@ -38,57 +43,51 @@ class SliceData(Dataset):
         # Index the fname and slice using the list created in __init__
         
         fname, slice = self.examples[i] 
-        # Print statements 
-        #print (fname,slice)
-    
-        with h5py.File(fname, 'r') as data:
 
-            input_img  = data[self.key_img][:,:,slice]
-            input_kspace  = data[self.key_kspace][:,:,slice]
-            input_kspace = npComplexToTorch(input_kspace)
-    
-            target = data['volfs'][:,:,slice]
+        t1_path = os.path.join(self.t1_dir,fname)
+        flair_path = os.path.join(self.flair_dir,fname)
 
-            #kspace_cmplx = np.fft.fft2(target,norm='ortho')
-            #uskspace_cmplx = kspace_cmplx * self.mask
-            #zf_img = np.abs(np.fft.ifft2(uskspace_cmplx,norm='ortho'))
-            
-            #if self.dataset_type == 'cardiac':
-                # Cardiac dataset should be padded,150 becomes 160. # this can be commented for kirby brain 
-            if False:
-                input_img  = np.pad(input_img,(5,5),'constant',constant_values=(0,0))
-                target = np.pad(target,(5,5),'constant',constant_values=(0,0))
+        with h5py.File(flair_path, 'r') as data:
 
-            # Print statements
-            #print (input.shape,target.shape)
-            #return torch.from_numpy(zf_img), torch.from_numpy(target)
-            return torch.from_numpy(input_img), input_kspace, torch.from_numpy(target)
-            
-class SliceDataDev(Dataset):
+            flair_img  = data[self.key_img][:,:,slice]
+            flair_kspace  = data[self.key_kspace][:,:,slice]
+            flair_kspace = npComplexToTorch(flair_kspace)
+            flair_target = data['volfs'][:,:,slice].astype(np.float64)
+
+        with h5py.File(t1_path, 'r') as data:
+
+            t1_img  = data[self.key_img][:,:,slice]
+            t1_kspace  = data[self.key_kspace][:,:,slice]
+            t1_kspace = npComplexToTorch(t1_kspace)
+            t1_target = data['volfs'][:,:,slice].astype(np.float64)
+
+            return torch.from_numpy(flair_img), flair_kspace, torch.from_numpy(t1_img), t1_kspace, torch.from_numpy(flair_target), torch.from_numpy(t1_target), fname, slice
+
+
+class SliceData(Dataset):
     """
     A PyTorch Dataset that provides access to MR image slices.
     """
 
-    #def __init__(self, root,acc_factor,dataset_type,mask_path):
-    def __init__(self, root,acc_factor,dataset_type):
-
+    #def __init__(self, root, acc_factor,dataset_type,mask_path): # acc_factor can be passed here and saved as self variable
+    def __init__(self, root, acc_factor, mode, contrast): # acc_factor can be passed here and saved as self variable
         # List the h5 files in root 
-        files = list(pathlib.Path(root).iterdir())
-        self.examples = []
-        self.acc_factor = acc_factor
-        self.dataset_type = dataset_type
 
+        self.examples = []
+        self.acc_factor = acc_factor 
         self.key_img = 'img_volus_{}'.format(self.acc_factor)
         self.key_kspace = 'kspace_volus_{}'.format(self.acc_factor)
 
-        #mask_path = os.path.join(mask_path,'mask_{}.npy'.format(acc_factor))
-        #self.mask = np.load(mask_path)
+        self.data_dir = os.path.join(root, 'mrbrain_{}'.format(contrast), 'cartesian', mode,'acc_{}'.format(acc_factor))
 
-        for fname in sorted(files):
-            with h5py.File(fname,'r') as hf:
-                #print(hf.keys())
+        files = glob.glob(os.path.join(self.data_dir,'*.h5'))
+
+        for file_path in sorted(files):
+            with h5py.File(file_path,'r') as hf:
+                #print (hf.keys())
                 fsvol = hf['volfs']
                 num_slices = fsvol.shape[2]
+                fname = os.path.basename(file_path)
                 self.examples += [(fname, slice) for slice in range(num_slices)]
 
     def __len__(self):
@@ -97,99 +96,16 @@ class SliceDataDev(Dataset):
     def __getitem__(self, i):
         # Index the fname and slice using the list created in __init__
         
-        fname, slice = self.examples[i]
-        #print (fname)
-        # Print statements 
-        #print (type(fname),slice)
-    
-        with h5py.File(fname, 'r') as data:
+        fname, slice = self.examples[i] 
 
-            input_img  = data[self.key_img][:,:,slice]
-            input_kspace  = data[self.key_kspace][:,:,slice]
-            input_kspace = npComplexToTorch(input_kspace)
-            target = data['volfs'][:,:,slice]
+        data_path = os.path.join(self.data_dir,fname)
 
-            #kspace_cmplx = np.fft.fft2(target,norm='ortho')
-            #uskspace_cmplx = kspace_cmplx * self.mask
-            #zf_img = np.abs(np.fft.ifft2(uskspace_cmplx,norm='ortho'))
- 
+        with h5py.File(data_path, 'r') as data:
 
-            #if self.dataset_type == 'cardiac':
-            if False:
-                # Cardiac dataset should be padded,150 becomes 160. # this can be commented for kirby brain 
-                input_img  = np.pad(input_img,(5,5),'constant',constant_values=(0,0))
-                target = np.pad(target,(5,5),'constant',constant_values=(0,0))
+            img  = data[self.key_img][:,:,slice]
+            kspace  = data[self.key_kspace][:,:,slice]
+            kspace = npComplexToTorch(kspace)
+            target = data['volfs'][:,:,slice].astype(np.float64)
 
-            # Print statements
-            #print (input.shape,target.shape)
-            return torch.from_numpy(input_img), input_kspace, torch.from_numpy(target),str(fname.name),slice
-            #return torch.from_numpy(zf_img), torch.from_numpy(target),str(fname.name),slice
+            return torch.from_numpy(img), kspace, torch.from_numpy(target), fname, slice
 
-class KneeData(Dataset):
-
-    def __init__(self, root, acc_factor,dataset_type): 
-
-        files = list(pathlib.Path(root).iterdir())
-        self.examples = []
-        self.acc_factor = acc_factor 
-        self.dataset_type = dataset_type
-        self.key_img = 'img_volus_{}'.format(self.acc_factor)
-        self.key_kspace = 'kspace_volus_{}'.format(self.acc_factor)
-
-        for fname in sorted(files):
-            self.examples.append(fname)
-
-    def __len__(self):
-        return len(self.examples)
-
-    def __getitem__(self, i):
-        
-        fname = self.examples[i] 
-        #print (fname)
-        #print (self.key_img,self.key_kspace)
-
-        with h5py.File(fname, 'r') as data:
-
-            
-            input_img  = data[self.key_img].value
-            input_kspace  = data[self.key_kspace].value
-            input_kspace = npComplexToTorch(input_kspace)
-            target = data['volfs'].value
-
-            return torch.from_numpy(input_img), input_kspace, torch.from_numpy(target)
- 
-
-class KneeDataDev(Dataset):
-
-    def __init__(self, root,acc_factor,dataset_type):
-
-        files = list(pathlib.Path(root).iterdir())
-        self.examples = []
-        self.acc_factor = acc_factor
-        self.dataset_type = dataset_type
-
-        self.key_img = 'img_volus_{}'.format(self.acc_factor)
-        self.key_kspace = 'kspace_volus_{}'.format(self.acc_factor)
-
-        for fname in sorted(files):
-            self.examples.append(fname) 
-
-    def __len__(self):
-        return len(self.examples)
-
-    def __getitem__(self, i):
-        
-        fname = self.examples[i]
-    
-        with h5py.File(fname, 'r') as data:
-
-            input_img  = data[self.key_img].value
-            input_kspace  = data[self.key_kspace].value
-            input_kspace = npComplexToTorch(input_kspace)
-            target = data['volfs'].value
-        
-        return torch.from_numpy(input_img), input_kspace, torch.from_numpy(target),str(fname.name)
-
-
-
- 

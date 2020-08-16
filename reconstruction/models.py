@@ -13,29 +13,41 @@ class DataConsistencyLayer(nn.Module):
 
         self.us_mask = us_mask 
 
-    def forward(self,predicted_img,us_kspace):
+    def forward(self,predicted_img_,us_kspace_):
 
-        # us_kspace     = us_kspace[:,0,:,:]
-        predicted_img = predicted_img[:,0,:,:]
-        
-        kspace_predicted_img = torch.rfft(predicted_img,2,True,False).double()
-        #print (us_kspace.shape,predicted_img.shape,kspace_predicted_img.shape,self.us_mask.shape)
-        #torch.Size([4, 1, 256, 256, 2]) torch.Size([4, 256, 256]) torch.Size([4, 256, 256, 2]) torch.Size([1, 256, 256, 1])
-        #print (self.us_mask.dtype,us_kspace.dtype)
-        updated_kspace1  = self.us_mask * us_kspace 
-        updated_kspace2  = (1 - self.us_mask) * kspace_predicted_img
-        #print("updated_kspace1 shape: ",updated_kspace1.shape," updated_kspace2 shape: ",updated_kspace2.shape)
-        #updated_kspace1 shape:  torch.Size([4, 1, 256, 256, 2])  updated_kspace2 shape:  torch.Size([4, 256, 256, 2])
-        updated_kspace   = updated_kspace1[:,0,:,:,:] + updated_kspace2
+        nslices = predicted_img_.shape[1] # nslices to do dc.
+        updated_imgs = []
+        #print (nslices)
+ 
+        for ii in range(nslices):
 
-        updated_img    = torch.ifft(updated_kspace,2,True) 
-        
-        #update_img_abs = torch.sqrt(updated_img[:,:,:,0]**2 + updated_img[:,:,:,1]**2)
-        update_img_abs = updated_img[:,:,:,0]
-        
-        update_img_abs = update_img_abs.unsqueeze(1)
-        
-        return update_img_abs.float()
+            # us_kspace     = us_kspace[:,0,:,:]
+            predicted_img = predicted_img_[:,ii,:,:]
+            us_kspace = us_kspace_[:,ii,:,:,:]
+            
+            kspace_predicted_img = torch.rfft(predicted_img,2,True,False).double()
+             
+            #print (us_kspace.shape,predicted_img.shape,kspace_predicted_img.shape,self.us_mask.shape)
+            #torch.Size([4, 1, 256, 256, 2]) torch.Size([4, 256, 256]) torch.Size([4, 256, 256, 2]) torch.Size([1, 256, 256, 1])
+            #print (self.us_mask.dtype,us_kspace.dtype)
+            updated_kspace1  = self.us_mask * us_kspace 
+            updated_kspace2  = (1 - self.us_mask) * kspace_predicted_img
+            #print("updated_kspace1 shape: ",updated_kspace1.shape," updated_kspace2 shape: ",updated_kspace2.shape)
+            #updated_kspace1 shape:  torch.Size([4, 1, 256, 256, 2])  updated_kspace2 shape:  torch.Size([4, 256, 256, 2])
+            updated_kspace   = updated_kspace1 + updated_kspace2
+
+            updated_img    = torch.ifft(updated_kspace,2,True) 
+            
+            #update_img_abs = torch.sqrt(updated_img[:,:,:,0]**2 + updated_img[:,:,:,1]**2)
+            update_img_abs = updated_img[:,:,:,0]
+            
+            updated_imgs.append(update_img_abs)
+
+        if not nslices == 1:
+            update_img_abs = torch.stack(updated_imgs, dim=1)
+            return update_img_abs.float()
+
+        return update_img_abs.unsqueeze(1).float()
 
 
 class TeacherNet(nn.Module):
@@ -43,11 +55,11 @@ class TeacherNet(nn.Module):
     def __init__(self):
         super(TeacherNet, self).__init__()
         
-        self.conv1 = nn.Conv2d(1,32,kernel_size=3,stride=1,padding=1)
+        self.conv1 = nn.Conv2d(2,32,kernel_size=3,stride=1,padding=1)
         self.conv2 = nn.Conv2d(32,32,kernel_size=3,stride=1,padding=1)
         self.conv3 = nn.Conv2d(32,32,kernel_size=3,stride=1,padding=1)
         self.conv4 = nn.Conv2d(32,32,kernel_size=3,stride=1,padding=1)
-        self.conv5 = nn.Conv2d(32,1,kernel_size=3,stride=1,padding=1)
+        self.conv5 = nn.Conv2d(32,2,kernel_size=3,stride=1,padding=1)
         
     def forward(self, x):
 
@@ -103,15 +115,19 @@ class StudentNet(nn.Module):
         
         self.conv1 = nn.Conv2d(1,32,kernel_size=3,stride=1,padding=1)
         self.conv2 = nn.Conv2d(32,32,kernel_size=3,stride=1,padding=1)
-        self.conv3 = nn.Conv2d(32,1,kernel_size=3,stride=1,padding=1)
+        self.conv3 = nn.Conv2d(32,32,kernel_size=3,stride=1,padding=1)
+        self.conv4 = nn.Conv2d(32,32,kernel_size=3,stride=1,padding=1)
+        self.conv5 = nn.Conv2d(32,1,kernel_size=3,stride=1,padding=1)
         
     def forward(self, x):
 
         x1 = F.relu(self.conv1(x))
         x2 = F.relu(self.conv2(x1))
-        x3 = self.conv3(x2)
+        x3 = F.relu(self.conv3(x2))
+        x4 = F.relu(self.conv4(x3))
+        x5 = self.conv5(x4)
         
-        return x1,x2,x3
+        return x1,x2,x3,x3,x4,x5
 
 
 class DCStudentNet(nn.Module):

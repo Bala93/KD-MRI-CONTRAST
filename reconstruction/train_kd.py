@@ -13,7 +13,7 @@ import torchvision
 from tensorboardX import SummaryWriter
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
-from dataset import SliceData,KneeData
+from dataset import SliceData
 #from models import UnetModel,conv_block
 #from models import DnCn1,DnCn2
 #from models import DnCn2
@@ -32,27 +32,14 @@ logger = logging.getLogger(__name__)
 
 def create_datasets(args):
 
-    train_data = SliceData(args.train_path,args.acceleration_factor,args.dataset_type)
-    dev_data = SliceData(args.validation_path,args.acceleration_factor,args.dataset_type)
+    train_data = SliceData(args.dataset_path,args.acceleration_factor,'train', args.contrast_type)
+    dev_data = SliceData(args.dataset_path,args.acceleration_factor,'validation',args.contrast_type)
 
     return dev_data, train_data
-
-def create_datasets_knee(args):
-
-    train_data = KneeData(args.train_path,args.acceleration_factor,args.dataset_type)
-    dev_data = KneeData(args.validation_path,args.acceleration_factor,args.dataset_type)
-
-    return dev_data, train_data
-
 
 def create_data_loaders(args):
 
-    if args.dataset_type == 'knee':
-        dev_data, train_data = create_datasets_knee(args)
-    else:
-        dev_data, train_data = create_datasets(args)
-
-
+    dev_data, train_data = create_datasets(args)
 
     display_data = [dev_data[i] for i in range(0, len(dev_data), len(dev_data) // 16)]
 
@@ -96,7 +83,7 @@ def train_epoch(args, epoch,modelT,modelS,data_loader, optimizer, writer):#,erro
 
     for iter, data in enumerate(tqdm(data_loader)):
 
-        input,input_kspace,target = data # Return kspace also we can ignore that for train and test 
+        input,input_kspace,target,_,_ = data # Return kspace also we can ignore that for train and test 
         input = input.unsqueeze(1).to(args.device)
         input_kspace = input_kspace.unsqueeze(1).to(args.device)
         target = target.unsqueeze(1).to(args.device)
@@ -104,7 +91,7 @@ def train_epoch(args, epoch,modelT,modelS,data_loader, optimizer, writer):#,erro
         input = input.float()
         target = target.float()
 
-        outputT = modelT(input,input_kspace)
+        #outputT = modelT(input,input_kspace)
         outputS = modelS(input,input_kspace)
 
         #outputT_VGG = vgg(outputT[-1])
@@ -114,7 +101,7 @@ def train_epoch(args, epoch,modelT,modelS,data_loader, optimizer, writer):#,erro
         #print (torch.max(outputS_VGG),torch.min(outputS_VGG))
 
         lossSG = F.l1_loss(outputS[-1],target) # ground truth loss 
-        lossST = F.l1_loss(outputS[-1],outputT[-1]) / outputT[-1].numel() # student - teacher loss 
+        #lossST = F.l1_loss(outputS[-1],outputT[-1]) / outputT[-1].numel() # student - teacher loss 
         #lossTG = F.l1_loss(outputT[-1],target)  # ground truth - teacher 
         #lossSSIM = 1 - pytorch_ssim.ssim(outputT[-1],outputS[-1]) # ssim loss between teacher and student to better recover structures 
         #lossVGG = F.mse_loss(outputT_VGG, outputS_VGG) / outputS_VGG.numel()
@@ -210,7 +197,7 @@ def evaluate(args, epoch, modelT,modelS,data_loader, writer):
     with torch.no_grad():
         for iter, data in enumerate(tqdm(data_loader)):
     
-            input,input_kspace, target = data # Return kspace also we can ignore that for train and test
+            input,input_kspace, target, _, _ = data # Return kspace also we can ignore that for train and test
             input = input.unsqueeze(1).to(args.device)
             input_kspace = input_kspace.unsqueeze(1).to(args.device)
             target = target.unsqueeze(1).to(args.device)
@@ -280,7 +267,7 @@ def visualize(args, epoch, model,data_loader, writer):
     with torch.no_grad():
         for iter, data in enumerate(tqdm(data_loader)):
 
-            input,input_kspace,target = data # Return kspace also we can ignore that for train and test
+            input,input_kspace,target,_,_ = data # Return kspace also we can ignore that for train and test
             #input,_,target = data # Return kspace also we can ignore that for train and test
             input = input.unsqueeze(1).to(args.device)
             input_kspace = input_kspace.unsqueeze(1).to(args.device)
@@ -404,7 +391,7 @@ def main(args):
 
         dev_loss,dev_time = evaluate(args, epoch, modelT, modelS, dev_loader, writer)
 
-        #visualize(args, epoch, modelS,display_loader, writer)
+        visualize(args, epoch, modelS,display_loader, writer)
 
         is_new_best = dev_loss < best_dev_loss
         best_dev_loss = min(best_dev_loss,dev_loss)
@@ -436,8 +423,9 @@ def create_arg_parser():
                         help='Which device to train on. Set to "cuda" to use the GPU')
     parser.add_argument('--exp-dir', type=pathlib.Path, default='checkpoints',
                         help='Path where model and results should be saved')
-    parser.add_argument('--train-path',type=str,help='Path to train h5 files')
-    parser.add_argument('--validation-path',type=str,help='Path to test h5 files')
+    parser.add_argument('--dataset-path',type=str,help='Path to train h5 files')
+    #parser.add_argument('--train-path',type=str,help='Path to train h5 files')
+    #parser.add_argument('--validation-path',type=str,help='Path to test h5 files')
 
     parser.add_argument('--acceleration_factor',type=str,help='acceleration factors')
     parser.add_argument('--dataset_type',type=str,help='cardiac,kirby')
@@ -446,6 +434,7 @@ def create_arg_parser():
     parser.add_argument('--student_checkpoint',type=str,help='student checkpoint')
     parser.add_argument('--student_pretrained',action='store_true',help='for selecting whether to use student_pretrained_not')
     parser.add_argument('--imitation_required',action='store_true',help='option to select imitation loss')
+    parser.add_argument('--contrast_type',type=str,help='contrast type') #flair, t1 
     
     return parser
 

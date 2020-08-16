@@ -13,7 +13,7 @@ import torchvision
 from tensorboardX import SummaryWriter
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
-from dataset import SliceData,KneeData
+from dataset import SliceDataMulti
 #from models import UnetModel,conv_block
 #from models import DnCn1,DnCn2
 #from models import DnCn2
@@ -34,25 +34,14 @@ logger = logging.getLogger(__name__)
 
 def create_datasets(args):
 
-    train_data = SliceData(args.train_path,args.acceleration_factor,args.dataset_type)
-    dev_data = SliceData(args.validation_path,args.acceleration_factor,args.dataset_type)
+    train_data = SliceDataMulti(args.dataset_path,args.acceleration_factor,'train')
+    dev_data = SliceDataMulti(args.dataset_path,args.acceleration_factor,'validation')
 
     return dev_data, train_data
-
-def create_datasets_knee(args):
-
-    train_data = KneeData(args.train_path,args.acceleration_factor,args.dataset_type)
-    dev_data = KneeData(args.validation_path,args.acceleration_factor,args.dataset_type)
-
-    return dev_data, train_data
-
 
 def create_data_loaders(args):
 
-    if args.dataset_type == 'knee':
-        dev_data, train_data = create_datasets_knee(args)
-    else:
-        dev_data, train_data = create_datasets(args)
+    dev_data, train_data = create_datasets(args)
 
     display_data = [dev_data[i] for i in range(0, len(dev_data), len(dev_data) // 16)]
 
@@ -76,6 +65,7 @@ def create_data_loaders(args):
         #num_workers=64,
         #pin_memory=True,
     )
+
     return train_loader, dev_loader, display_loader #,train_loader_error
 
 
@@ -92,16 +82,19 @@ def train_epoch(args, epoch,modelT,modelS,data_loader, optimizer, writer):#,erro
 
     for iter, data in enumerate(tqdm(data_loader)):
 
-        input,input_kspace,target = data # Return kspace also we can ignore that for train and test 
-        input = input.unsqueeze(1).to(args.device)
-        input_kspace = input_kspace.unsqueeze(1).to(args.device)
-        target = target.unsqueeze(1).to(args.device)
+        flair_img, flair_kspace, t1_img, t1_kspace, flair_target, t1_target, _, _  = data # Return kspace also we can ignore that for train and test        
+        input = torch.stack([flair_img, t1_img], dim=1)
+        input_kspace = torch.stack([flair_kspace, t1_kspace], dim=1)
+        #target = torch.stack([flair_target, t1_target], dim=1)
 
-        input = input.float()
-        target = target.float()
+        input = input.float().to(args.device)
+        input_kspace = input_kspace.to(args.device)
+        #target = target.float().to(args.device)
 
         outputT = modelT(input,input_kspace)
-        outputS = modelS(input,input_kspace)
+        outputS = modelS(input[:,1,:,:].unsqueeze(1),input_kspace[:,1,:,:].unsqueeze(1))
+
+        #print (outputT.shape, outputS.shape)
 
         #outputT_VGG = vgg(outputT[-1])
         #outputS_VGG = vgg(outputS[-1])
@@ -121,7 +114,7 @@ def train_epoch(args, epoch,modelT,modelS,data_loader, optimizer, writer):#,erro
         #print(lossSG, lossST, lossTG, lossVGG)
         # middle layer 
         outputT_feat = [outputT[0][2],outputT[1][2],outputT[2][2],outputT[3][2],outputT[4][2]]
-        outputS_feat = [outputS[0][1],outputS[1][1],outputS[2][1],outputS[3][1],outputS[4][1]]
+        outputS_feat = [outputS[0][2],outputS[1][2],outputS[2][2],outputS[3][2],outputS[4][2]]
         # last layer 
         #outputT_feat = [outputT[0][-1],outputT[1][-1],outputT[2][-1],outputT[3][-1],outputT[4][-1]]
         #outputS_feat = [outputS[0][-1],outputS[1][-1],outputS[2][-1],outputS[3][-1],outputS[4][-1]]
@@ -205,25 +198,22 @@ def evaluate(args, epoch, modelT,modelS,data_loader, writer):
     
     with torch.no_grad():
         for iter, data in enumerate(tqdm(data_loader)):
-    
-            input,input_kspace, target = data # Return kspace also we can ignore that for train and test
-            input = input.unsqueeze(1).to(args.device)
-            input_kspace = input_kspace.unsqueeze(1).to(args.device)
-            target = target.unsqueeze(1).to(args.device)
-    
-            input = input.float()
-            target = target.float()
-    
-            #output = model(input,input_kspace)
-            #loss = F.mse_loss(output[-1],target)
-            #losses.append(loss.item())
 
+            flair_img, flair_kspace, t1_img, t1_kspace, flair_target, t1_target, _, _  = data # Return kspace also we can ignore that for train and test        
+            input = torch.stack([flair_img, t1_img], dim=1)
+            input_kspace = torch.stack([flair_kspace, t1_kspace], dim=1)
+            #target = torch.stack([flair_target, t1_target], dim=1)
+    
+            input = input.float().to(args.device)
+            input_kspace = input_kspace.to(args.device)
+            #target = target.float().to(args.device)
+    
             outputT = modelT(input,input_kspace)
-            outputS = modelS(input,input_kspace)
-
+            outputS = modelS(input[:,1,:,:].unsqueeze(1),input_kspace[:,1,:,:].unsqueeze(1))
+    
             # middle layer 
             outputT_feat = [outputT[0][2],outputT[1][2],outputT[2][2],outputT[3][2],outputT[4][2]]
-            outputS_feat = [outputS[0][1],outputS[1][1],outputS[2][1],outputS[3][1],outputS[4][1]]
+            outputS_feat = [outputS[0][2],outputS[1][2],outputS[2][2],outputS[3][2],outputS[4][2]]
 
             #outputT_feat  = outputT_feat_list[2]
             #outputS_feat  = outputS_feat_list[2]
@@ -435,8 +425,9 @@ def create_arg_parser():
                         help='Which device to train on. Set to "cuda" to use the GPU')
     parser.add_argument('--exp-dir', type=pathlib.Path, default='checkpoints',
                         help='Path where model and results should be saved')
-    parser.add_argument('--train-path',type=str,help='Path to train h5 files')
-    parser.add_argument('--validation-path',type=str,help='Path to test h5 files')
+    parser.add_argument('--dataset-path',type=str,help='Path to train h5 files')
+    #parser.add_argument('--train-path',type=str,help='Path to train h5 files')
+    #parser.add_argument('--validation-path',type=str,help='Path to test h5 files')
 
     parser.add_argument('--acceleration_factor',type=str,help='acceleration factors')
     parser.add_argument('--dataset_type',type=str,help='cardiac,kirby')

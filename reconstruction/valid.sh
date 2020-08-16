@@ -3,11 +3,11 @@ MODEL='attention_imitation'
 DATASET_TYPE='mrbrain'
 MODEL_TYPE='teacher' #student,kd
 
-ACC_FACTOR='4x'
+ACC_FACTOR='8x'
 BATCH_SIZE=1
 DEVICE='cuda:1'
 
-DATA_PATH=${BASE_PATH}'/datasets/'${DATASET_TYPE}'/validation/acc_'${ACC_FACTOR}
+DATA_PATH=${BASE_PATH}'/datasets/'${DATASET_TYPE}
 CHECKPOINT=${BASE_PATH}'/experiments/'${DATASET_TYPE}'/acc_'${ACC_FACTOR}'/'${MODEL}'_'${MODEL_TYPE}'/best_model.pt'
 OUT_DIR=${BASE_PATH}'/experiments/'${DATASET_TYPE}'/acc_'${ACC_FACTOR}'/'${MODEL}'_'${MODEL_TYPE}'/results'
 
